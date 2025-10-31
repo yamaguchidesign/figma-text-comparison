@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>テキスト比較</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, sans-serif;
+        padding: 16px;
+        background: #ffffff;
+        color: #333;
+      }
+
+      h2 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 16px;
+        color: #1a1a1a;
+      }
+
+      .message {
+        padding: 12px;
+        background: #f0f0f0;
+        border-radius: 4px;
+        margin-bottom: 16px;
+        color: #666;
+        font-size: 14px;
+        text-align: center;
+      }
+
+      .comparison-container {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .text-panel {
+        flex: 1;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        padding: 12px;
+        background: #fafafa;
+        min-height: 200px;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .text-panel h3 {
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 8px;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .text-content {
+        font-size: 13px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+      }
+
+      .text-content .diff-added {
+        background: #d4edda;
+        color: #155724;
+        padding: 2px 4px;
+        border-radius: 2px;
+      }
+
+      .text-content .diff-removed {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 2px 4px;
+        border-radius: 2px;
+        text-decoration: line-through;
+      }
+
+      .text-content .diff-changed {
+        background: #fff3cd;
+        color: #856404;
+        padding: 2px 4px;
+        border-radius: 2px;
+      }
+
+      .button-container {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      button {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+
+      button:hover {
+        opacity: 0.9;
+      }
+
+      button#cancel {
+        background: #e0e0e0;
+        color: #333;
+      }
+
+      button#cancel:hover {
+        background: #d0d0d0;
+      }
+
+      .error {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 12px;
+        border-radius: 4px;
+        margin-bottom: 16px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>テキスト比較</h2>
+    <div id="message" class="message">
+      比較するテキストレイヤーを2つ選択してください
+    </div>
+    <div id="error" class="error" style="display: none"></div>
+    <div id="comparison" class="comparison-container" style="display: none">
+      <div class="text-panel">
+        <h3>テキスト1</h3>
+        <div id="text1" class="text-content"></div>
+      </div>
+      <div class="text-panel">
+        <h3>テキスト2</h3>
+        <div id="text2" class="text-content"></div>
+      </div>
+    </div>
+    <div class="button-container">
+      <button id="cancel">閉じる</button>
+    </div>
+
+    <script>
+      var messageEl = document.getElementById("message");
+      var errorEl = document.getElementById("error");
+      var comparisonEl = document.getElementById("comparison");
+      var text1El = document.getElementById("text1");
+      var text2El = document.getElementById("text2");
+
+      // 差分を検出してハイライトする関数
+      function highlightDiff(text1, text2) {
+        if (text1 === text2) {
+          // 完全に同じ場合
+          text1El.innerHTML = escapeHtml(text1);
+          text2El.innerHTML = escapeHtml(text2);
+          return;
+        }
+
+        // 行ごとに比較
+        var lines1 = text1.split("\n");
+        var lines2 = text2.split("\n");
+
+        // 最大行数を取得
+        var maxLines = Math.max(lines1.length, lines2.length);
+        var result1 = "";
+        var result2 = "";
+
+        for (var i = 0; i < maxLines; i++) {
+          var line1 = lines1[i] || "";
+          var line2 = lines2[i] || "";
+
+          if (line1 === line2) {
+            // 同じ行
+            result1 += escapeHtml(line1);
+            result2 += escapeHtml(line2);
+          } else {
+            // 異なる行 - より正確な差分検出
+            var diff1 = computeDiff(line1, line2);
+            var diff2 = computeDiff(line2, line1);
+            result1 += diff1;
+            result2 += diff2;
+          }
+
+          if (i < maxLines - 1) {
+            result1 += "\n";
+            result2 += "\n";
+          }
+        }
+
+        text1El.innerHTML = result1;
+        text2El.innerHTML = result2;
+      }
+
+      // より正確な差分検出（difff.jp風の実装）
+      function computeDiff(str1, str2) {
+        if (str1 === str2) {
+          return escapeHtml(str1);
+        }
+
+        var result = "";
+        var i = 0;
+        var j = 0;
+        var len1 = str1.length;
+        var len2 = str2.length;
+
+        while (i < len1 || j < len2) {
+          // 現在位置の文字が一致するかチェック
+          if (i < len1 && j < len2 && str1[i] === str2[j]) {
+            // 一致する場合はそのまま表示（ハイライトなし）
+            result += escapeHtml(str1[i]);
+            i++;
+            j++;
+            continue;
+          }
+
+          // 一致しない場合、短い範囲で次の一致点を探す
+          var match = findNextMatch(str1, i, str2, j);
+
+          if (match.found && match.length > 0) {
+            // 一致点までの差分を処理
+            // str1の差分部分（削除された部分）
+            if (match.pos1 > i) {
+              result += '<span class="diff-removed">' + 
+                escapeHtml(str1.substring(i, match.pos1)) + '</span>';
+            }
+            
+            // str2の差分部分（追加された部分、この側では表示しない）
+            // jからmatch.pos2までがstr2で追加された部分
+            
+            // 一致する部分をそのまま表示（ハイライトなし）
+            result += escapeHtml(str1.substring(match.pos1, match.pos1 + match.length));
+            i = match.pos1 + match.length;
+            j = match.pos2 + match.length;
+          } else {
+            // これ以上一致がない場合、残りすべてをハイライト
+            if (i < len1) {
+              result += '<span class="diff-removed">' + 
+                escapeHtml(str1.substring(i)) + '</span>';
+            }
+            break;
+          }
+        }
+
+        return result;
+      }
+
+      // 次の一致点を探す（短い範囲で効率的に）
+      function findNextMatch(str1, start1, str2, start2) {
+        var len1 = str1.length;
+        var len2 = str2.length;
+
+        // 探索範囲を制限（一文字の差分を正確に検出するため）
+        var maxSearch = 20; // 最大20文字先まで探索
+        var bestMatch = { found: false, pos1: 0, pos2: 0, length: 0 };
+
+        // 両方の文字列を同時に進めて、一致する箇所を探す
+        // これは「うううあああ」と「いいいあああ」のような場合に
+        // 共通部分「あああ」を見つけるため
+        for (var offset = 1; offset <= maxSearch; offset++) {
+          var pos1 = start1 + offset;
+          var pos2 = start2 + offset;
+          
+          if (pos1 >= len1 || pos2 >= len2) {
+            break;
+          }
+
+          if (str1[pos1] === str2[pos2]) {
+            // 一致した文字から続く共通部分列の長さを計算
+            var length = 1;
+            while (
+              pos1 + length < len1 &&
+              pos2 + length < len2 &&
+              str1[pos1 + length] === str2[pos2 + length]
+            ) {
+              length++;
+            }
+
+            // より長い一致を優先、長さが同じ場合はより近い方を優先
+            if (length > bestMatch.length || 
+                (length === bestMatch.length && offset < (bestMatch.pos1 - start1))) {
+              bestMatch = {
+                found: true,
+                pos1: pos1,
+                pos2: pos2,
+                length: length
+              };
+            }
+          }
+        }
+
+        // また、片方だけを進めた場合もチェック（挿入/削除の検出）
+        // str1だけを進める場合（str2に文字が追加された）
+        for (var offset1 = 1; offset1 <= maxSearch && start1 + offset1 < len1; offset1++) {
+          if (str1[start1 + offset1] === str2[start2]) {
+            var length = 1;
+            while (
+              start1 + offset1 + length < len1 &&
+              start2 + length < len2 &&
+              str1[start1 + offset1 + length] === str2[start2 + length]
+            ) {
+              length++;
+            }
+
+            if (length > bestMatch.length || 
+                (length === bestMatch.length && offset1 < (bestMatch.pos1 - start1))) {
+              bestMatch = {
+                found: true,
+                pos1: start1 + offset1,
+                pos2: start2,
+                length: length
+              };
+            }
+          }
+        }
+
+        // str2だけを進める場合（str1から文字が削除された）
+        for (var offset2 = 1; offset2 <= maxSearch && start2 + offset2 < len2; offset2++) {
+          if (str1[start1] === str2[start2 + offset2]) {
+            var length = 1;
+            while (
+              start1 + length < len1 &&
+              start2 + offset2 + length < len2 &&
+              str1[start1 + length] === str2[start2 + offset2 + length]
+            ) {
+              length++;
+            }
+
+            if (length > bestMatch.length || 
+                (length === bestMatch.length && offset2 < (bestMatch.pos2 - start2))) {
+              bestMatch = {
+                found: true,
+                pos1: start1,
+                pos2: start2 + offset2,
+                length: length
+              };
+            }
+          }
+        }
+
+        return bestMatch;
+      }
+
+      // HTMLエスケープ
+      function escapeHtml(text) {
+        var div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      // UIが読み込まれたことを確認
+      if (messageEl && errorEl && comparisonEl && text1El && text2El) {
+        // メッセージを受け取る
+        window.onmessage = function(event) {
+          if (!event || !event.data || !event.data.pluginMessage) {
+            return;
+          }
+
+          var msg = event.data.pluginMessage;
+
+          if (msg.type === "no-selection" || msg.type === "one-selection") {
+            if (messageEl) {
+              messageEl.textContent = msg.message;
+              messageEl.style.display = "block";
+            }
+            if (errorEl) {
+              errorEl.style.display = "none";
+            }
+            if (comparisonEl) {
+              comparisonEl.style.display = "none";
+            }
+          } else if (msg.type === "texts-selected") {
+            if (messageEl) {
+              messageEl.style.display = "none";
+            }
+            if (errorEl) {
+              errorEl.style.display = "none";
+            }
+            if (comparisonEl) {
+              comparisonEl.style.display = "flex";
+            }
+            if (msg.text1 !== undefined && msg.text2 !== undefined) {
+              highlightDiff(msg.text1, msg.text2);
+            }
+          } else if (msg.type === "error") {
+            if (messageEl) {
+              messageEl.style.display = "none";
+            }
+            if (errorEl) {
+              errorEl.textContent = msg.message;
+              errorEl.style.display = "block";
+            }
+            if (comparisonEl) {
+              comparisonEl.style.display = "none";
+            }
+          }
+        };
+      } else {
+        console.error('UI要素が見つかりません');
+      }
+
+      // 閉じるボタン
+      document.getElementById("cancel").onclick = function() {
+        parent.postMessage({ pluginMessage: { type: "cancel" } }, "*");
+      };
+    </script>
+  </body>
+</html>
