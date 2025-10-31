@@ -223,12 +223,12 @@
             continue;
           }
 
-          // 一致しない場合、短い範囲で次の一致点を探す
+          // 一致しない場合、次の一致点を探す（より長い範囲で）
           var match = findNextMatch(str1, i, str2, j);
 
           if (match.found && match.length > 0) {
             // 一致点までの差分を処理
-            // str1の差分部分（削除された部分）
+            // str1の差分部分（削除された部分または変更された部分）
             if (match.pos1 > i) {
               result += '<span class="diff-removed">' + 
                 escapeHtml(str1.substring(i, match.pos1)) + '</span>';
@@ -238,7 +238,10 @@
             // jからmatch.pos2までがstr2で追加された部分
             
             // 一致する部分をそのまま表示（ハイライトなし）
-            result += escapeHtml(str1.substring(match.pos1, match.pos1 + match.length));
+            // これは共通部分なので、絶対にハイライトしない
+            if (match.length > 0) {
+              result += escapeHtml(str1.substring(match.pos1, match.pos1 + match.length));
+            }
             i = match.pos1 + match.length;
             j = match.pos2 + match.length;
           } else {
@@ -254,51 +257,18 @@
         return result;
       }
 
-      // 次の一致点を探す（短い範囲で効率的に）
+      // 次の一致点を探す（より正確な検出）
       function findNextMatch(str1, start1, str2, start2) {
         var len1 = str1.length;
         var len2 = str2.length;
 
-        // 探索範囲を制限（一文字の差分を正確に検出するため）
-        var maxSearch = 20; // 最大20文字先まで探索
+        // 探索範囲を増やす（長い共通部分を見つけるため）
+        var maxSearch = 200; // 最大200文字先まで探索
         var bestMatch = { found: false, pos1: 0, pos2: 0, length: 0 };
 
-        // 両方の文字列を同時に進めて、一致する箇所を探す
-        // これは「うううあああ」と「いいいあああ」のような場合に
-        // 共通部分「あああ」を見つけるため
-        for (var offset = 1; offset <= maxSearch; offset++) {
-          var pos1 = start1 + offset;
-          var pos2 = start2 + offset;
-          
-          if (pos1 >= len1 || pos2 >= len2) {
-            break;
-          }
-
-          if (str1[pos1] === str2[pos2]) {
-            // 一致した文字から続く共通部分列の長さを計算
-            var length = 1;
-            while (
-              pos1 + length < len1 &&
-              pos2 + length < len2 &&
-              str1[pos1 + length] === str2[pos2 + length]
-            ) {
-              length++;
-            }
-
-            // より長い一致を優先、長さが同じ場合はより近い方を優先
-            if (length > bestMatch.length || 
-                (length === bestMatch.length && offset < (bestMatch.pos1 - start1))) {
-              bestMatch = {
-                found: true,
-                pos1: pos1,
-                pos2: pos2,
-                length: length
-              };
-            }
-          }
-        }
-
-        // また、片方だけを進めた場合もチェック（挿入/削除の検出）
+        // すべての可能な組み合わせを探索して、最長の一致を見つける
+        // 片方だけを進める場合（挿入/削除の検出）
+        
         // str1だけを進める場合（str2に文字が追加された）
         for (var offset1 = 1; offset1 <= maxSearch && start1 + offset1 < len1; offset1++) {
           if (str1[start1 + offset1] === str2[start2]) {
@@ -311,8 +281,8 @@
               length++;
             }
 
-            if (length > bestMatch.length || 
-                (length === bestMatch.length && offset1 < (bestMatch.pos1 - start1))) {
+            // より長い一致を優先（長さが最も重要）
+            if (length > bestMatch.length) {
               bestMatch = {
                 found: true,
                 pos1: start1 + offset1,
@@ -335,12 +305,45 @@
               length++;
             }
 
-            if (length > bestMatch.length || 
-                (length === bestMatch.length && offset2 < (bestMatch.pos2 - start2))) {
+            // より長い一致を優先
+            if (length > bestMatch.length) {
               bestMatch = {
                 found: true,
                 pos1: start1,
                 pos2: start2 + offset2,
+                length: length
+              };
+            }
+          }
+        }
+
+        // 両方の文字列を同時に進めて、一致する箇所を探す（両方が同じオフセットで進む場合）
+        // これは挿入/削除がない場合のチェック
+        for (var offset = 1; offset <= maxSearch; offset++) {
+          var pos1 = start1 + offset;
+          var pos2 = start2 + offset;
+          
+          if (pos1 >= len1 || pos2 >= len2) {
+            break;
+          }
+
+          if (str1[pos1] === str2[pos2]) {
+            // 一致した文字から続く共通部分列の長さを計算
+            var length = 1;
+            while (
+              pos1 + length < len1 &&
+              pos2 + length < len2 &&
+              str1[pos1 + length] === str2[pos2 + length]
+            ) {
+              length++;
+            }
+
+            // より長い一致を優先（長さが最も重要）
+            if (length > bestMatch.length) {
+              bestMatch = {
+                found: true,
+                pos1: pos1,
+                pos2: pos2,
                 length: length
               };
             }
@@ -361,47 +364,59 @@
       if (messageEl && errorEl && comparisonEl && text1El && text2El) {
         // メッセージを受け取る
         window.onmessage = function(event) {
-          if (!event || !event.data || !event.data.pluginMessage) {
-            return;
-          }
+          try {
+            if (!event || !event.data || !event.data.pluginMessage) {
+              return;
+            }
 
-          var msg = event.data.pluginMessage;
+            var msg = event.data.pluginMessage;
+            
+            if (!msg || typeof msg !== 'object') {
+              return;
+            }
 
-          if (msg.type === "no-selection" || msg.type === "one-selection") {
-            if (messageEl) {
-              messageEl.textContent = msg.message;
-              messageEl.style.display = "block";
+            console.log('UI: メッセージを受信しました。タイプ:', msg.type);
+
+            if (msg.type === "no-selection" || msg.type === "one-selection") {
+              if (messageEl) {
+                messageEl.textContent = msg.message;
+                messageEl.style.display = "block";
+              }
+              if (errorEl) {
+                errorEl.style.display = "none";
+              }
+              if (comparisonEl) {
+                comparisonEl.style.display = "none";
+              }
+            } else if (msg.type === "texts-selected") {
+              console.log('UI: texts-selectedメッセージを受信しました');
+              if (messageEl) {
+                messageEl.style.display = "none";
+              }
+              if (errorEl) {
+                errorEl.style.display = "none";
+              }
+              if (comparisonEl) {
+                comparisonEl.style.display = "flex";
+              }
+              if (msg.text1 !== undefined && msg.text2 !== undefined) {
+                console.log('UI: 差分を計算します');
+                highlightDiff(msg.text1, msg.text2);
+              }
+            } else if (msg.type === "error") {
+              if (messageEl) {
+                messageEl.style.display = "none";
+              }
+              if (errorEl) {
+                errorEl.textContent = msg.message;
+                errorEl.style.display = "block";
+              }
+              if (comparisonEl) {
+                comparisonEl.style.display = "none";
+              }
             }
-            if (errorEl) {
-              errorEl.style.display = "none";
-            }
-            if (comparisonEl) {
-              comparisonEl.style.display = "none";
-            }
-          } else if (msg.type === "texts-selected") {
-            if (messageEl) {
-              messageEl.style.display = "none";
-            }
-            if (errorEl) {
-              errorEl.style.display = "none";
-            }
-            if (comparisonEl) {
-              comparisonEl.style.display = "flex";
-            }
-            if (msg.text1 !== undefined && msg.text2 !== undefined) {
-              highlightDiff(msg.text1, msg.text2);
-            }
-          } else if (msg.type === "error") {
-            if (messageEl) {
-              messageEl.style.display = "none";
-            }
-            if (errorEl) {
-              errorEl.textContent = msg.message;
-              errorEl.style.display = "block";
-            }
-            if (comparisonEl) {
-              comparisonEl.style.display = "none";
-            }
+          } catch (e) {
+            console.error('メッセージ処理エラー:', e);
           }
         };
       } else {
